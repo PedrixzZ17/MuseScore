@@ -560,6 +560,20 @@ uint64_t PlaybackController::notationPlaybackKey() const
     return reinterpret_cast<uint64_t>(notationPlayback().get());
 }
 
+void PlaybackController::synchronizePlaybackEvents()
+{
+    INotationPlaybackPtr nPlayback = notationPlayback();
+    if (!nPlayback) {
+        return;
+    }
+
+    nPlayback->sendEventsForChangedTracks();
+
+    if (currentPlayer()) {
+        m_currentTick = nPlayback->secToTick(currentPlayer()->playbackPosition());
+    }
+}
+
 void PlaybackController::onNotationChanged()
 {
     setNotation(globalContext()->currentNotation());
@@ -634,7 +648,7 @@ void PlaybackController::togglePlay(bool showErrors)
     if (isPlaying()) {
         pause();
     } else if (isPaused()) {
-        notationPlayback()->sendEventsForChangedTracks();
+        synchronizePlaybackEvents();
 
         if (currentPlayer()) {
             secs_t pos = currentPlayer()->playbackPosition();
@@ -647,7 +661,7 @@ void PlaybackController::togglePlay(bool showErrors)
             resume();
         }
     } else {
-        notationPlayback()->sendEventsForChangedTracks();
+        synchronizePlaybackEvents();
 
         play();
     }
@@ -686,6 +700,7 @@ void PlaybackController::playFromSelection(bool showErrors)
         return;
     }
 
+    synchronizePlaybackEvents();
     seek(playedTickToSecs(retval.val));
 
     if (isPaused()) {
@@ -700,6 +715,8 @@ void PlaybackController::play()
     IF_ASSERT_FAILED(currentPlayer()) {
         return;
     }
+
+    synchronizePlaybackEvents();
 
     if (isLoopEnabled()) {
         secs_t startSecs = playbackStartSecs();
@@ -1202,6 +1219,7 @@ void PlaybackController::doAddTrack(const InstrumentTrackId& instrumentTrackId, 
     });
 
     m_loadingTrackCount++;
+    m_loadingTotalTrackCount++;
 }
 
 void PlaybackController::addAuxTrack(aux_channel_idx_t index, const TrackAddFinished& onFinished)
@@ -1254,6 +1272,7 @@ void PlaybackController::addAuxTrack(aux_channel_idx_t index, const TrackAddFini
     });
 
     m_loadingTrackCount++;
+    m_loadingTotalTrackCount++;
 }
 
 void PlaybackController::setTrackActivity(const engraving::InstrumentTrackId& instrumentTrackId, const bool isActive)
@@ -1422,16 +1441,18 @@ void PlaybackController::setupTracks()
     }
 
     m_loadingTrackCount = 0;
+    m_loadingTotalTrackCount = 0;
 
     InstrumentTrackIdSet trackIdSet = notationPlayback()->existingTrackIdSet();
-    size_t trackCount = trackIdSet.size() + AUX_CHANNEL_NUM;
     std::string title = muse::trc("playback", "Loading audio samples");
 
-    auto onAddFinished = [this, trackCount, title]() {
-        m_loadingTrackCount--;
+    auto onAddFinished = [this, title]() {
+        if (m_loadingTrackCount > 0) {
+            m_loadingTrackCount--;
+        }
 
-        size_t current = trackCount - m_loadingTrackCount;
-        m_loadingProgress.progress(current, trackCount, title);
+        size_t current = m_loadingTotalTrackCount - m_loadingTrackCount;
+        m_loadingProgress.progress(current, m_loadingTotalTrackCount, title);
 
         if (m_loadingTrackCount == 0) {
             m_loadingProgress.finish(muse::make_ok());
@@ -1447,7 +1468,11 @@ void PlaybackController::setupTracks()
         addAuxTrack(idx, onAddFinished);
     }
 
-    m_loadingProgress.progress(0, trackCount, title);
+    if (m_loadingTotalTrackCount == 0) {
+        m_loadingProgress.finish(muse::make_ok());
+    } else {
+        m_loadingProgress.progress(0, m_loadingTotalTrackCount, title);
+    }
 
     notationPlayback()->trackAdded().onReceive(this, [this, onAddFinished](const InstrumentTrackId& instrumentTrackId) {
         addTrack(instrumentTrackId, onAddFinished);
@@ -1476,9 +1501,16 @@ void PlaybackController::setupTracks()
 void PlaybackController::setupPlayer()
 {
     currentPlayer()->playbackPositionChanged().onReceive(this, [this](const audio::secs_t pos) {
-        m_currentTick = notationPlayback()->secToTick(pos);
+        INotationPlaybackPtr nPlayback = notationPlayback();
+        if (!nPlayback) {
+            return;
+        }
 
-        updateCurrentTempo();
+        const muse::midi::tick_t tick = nPlayback->secToTick(pos);
+        if (tick != m_currentTick) {
+            m_currentTick = tick;
+            updateCurrentTempo();
+        }
 
         secs_t endSecs = totalPlayTime();
         if (pos + muse::msecs_to_secs(1) >= endSecs) {
@@ -1793,8 +1825,8 @@ void PlaybackController::setIsExportingAudio(bool exporting)
     m_isExportingAudio = exporting;
     updateSoloMuteStates();
 
-    if (exporting && notationPlayback()) {
-        notationPlayback()->sendEventsForChangedTracks();
+    if (exporting) {
+        synchronizePlaybackEvents();
     }
 }
 

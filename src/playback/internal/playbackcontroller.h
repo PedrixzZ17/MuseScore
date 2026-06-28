@@ -142,6 +142,7 @@ private:
     uint64_t notationPlaybackKey() const;
 
     void updateCurrentTempo();
+    void synchronizePlaybackEvents();
 
     void seekRawTick(const muse::midi::tick_t tick, const bool flushSound = true);
     void seek(const muse::audio::secs_t secs, const bool flushSound = true);
@@ -253,6 +254,7 @@ private:
 
     muse::Progress m_loadingProgress;
     size_t m_loadingTrackCount = 0;
+    size_t m_loadingTotalTrackCount = 0;
 
     bool m_isExportingAudio = false;
     bool m_isRangeSelection = false;
