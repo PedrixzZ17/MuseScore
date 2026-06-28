@@ -28,6 +28,8 @@ target_sources(iex_audioexport PRIVATE
     internal/audioexportconfiguration.h
     internal/abstractaudiowriter.cpp
     internal/abstractaudiowriter.h
+    internal/metadatawriter.cpp
+    internal/metadatawriter.h
     internal/mp3writer.cpp
     internal/mp3writer.h
     internal/wavewriter.cpp

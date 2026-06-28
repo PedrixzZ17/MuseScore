@@ -21,6 +21,8 @@
  */
 #include "abstractaudiowriter.h"
 
+#include "metadatawriter.h"
+
 #include <QCoreApplication>
 #include <QFile>
 #include <QFileInfo>
@@ -108,6 +110,7 @@ Ret AbstractAudioWriter::doWriteAndWait(INotationPtr notation,
 
     m_isCompleted = false;
     m_writeRet = muse::Ret();
+    m_exportNotation = notation;
 
     playbackController()->setNotation(notation);
     playbackController()->setIsExportingAudio(true);
@@ -165,6 +168,7 @@ void AbstractAudioWriter::doWrite(io::IODevice& dstDevice, const SoundTrackForma
     m_progress.start();
 
     auto playback = playbackInj();
+    const SoundTrackType trackType = format.type;
 
     playback->saveSoundTrackProgressChanged()
     .onReceive(this, [sendProgress](int64_t current, int64_t total, SaveSoundTrackStage stage) {
@@ -172,14 +176,14 @@ void AbstractAudioWriter::doWrite(io::IODevice& dstDevice, const SoundTrackForma
     });
 
     playback->saveSoundTrack(std::move(format), dstDevice)
-    .onResolve(this, [this, playback, restorePlaybackState](const bool /*result*/) {
+    .onResolve(this, [this, playback, restorePlaybackState, &dstDevice, trackType](const bool /*result*/) {
         LOGI() << "Successfully saved sound track";
 
         restorePlaybackState();
 
-        m_writeRet = muse::make_ok();
+        m_writeRet = MetadataWriter::writeMetadata(m_exportNotation, dstDevice, trackType);
         m_isCompleted = true;
-        m_progress.finish(muse::make_ok());
+        m_progress.finish(m_writeRet);
         playback->saveSoundTrackProgressChanged().disconnect(this);
     })
     .onReject(this, [this, playback, restorePlaybackState](int errorCode, const std::string& msg) {
