@@ -70,6 +70,7 @@ private:
     muse::Ret m_writeRet;
 
     notation::INotationPtr m_notationForRestore;
+    notation::INotationPtr m_exportNotation;
 };
 }
 
