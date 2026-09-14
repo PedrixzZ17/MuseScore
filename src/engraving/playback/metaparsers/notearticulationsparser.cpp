@@ -260,7 +260,11 @@ void NoteArticulationsParser::appendArticulations(const mpe::ArticulationTypeSet
             continue;
         }
 
-        const mpe::ArticulationPattern& pattern = ctx.profile->pattern(type);
+        // Keep the articulation identity even when the active profile does not
+        // provide its own arrangement pattern. This lets MuseSampler select an
+        // appropriate attack/release sample, while the standard pattern remains
+        // a safe timing fallback for profiles such as SoundFonts.
+        const mpe::ArticulationPattern& pattern = ctx.profile->pattern(type, mpe::ArticulationType::Standard);
         if (pattern.empty()) {
             continue;
         }

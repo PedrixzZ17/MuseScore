@@ -29,6 +29,7 @@
 #include "engraving/dom/measure.h"
 #include "engraving/dom/part.h"
 #include "engraving/dom/segment.h"
+#include "engraving/dom/symbol.h"
 #include "engraving/dom/ornament.h"
 #include "engraving/dom/tremolosinglechord.h"
 #include "engraving/dom/tremolotwochord.h"
@@ -181,6 +182,47 @@ TEST_F(Engraving_PlaybackEventsRendererTests, SingleNote_NoArticulations)
     EXPECT_EQ(event.expressionCtx().nominalDynamicLevel, dynamicLevelFromType(mpe::DynamicType::Natural));
     EXPECT_EQ(event.expressionCtx().articulations.size(), 1);
     EXPECT_TRUE(event.expressionCtx().articulations.contains(ArticulationType::Standard));
+}
+
+TEST_F(Engraving_PlaybackEventsRendererTests, NoteSymbols_KeepArticulationTypesWithStandardPatternFallback)
+{
+    Score* score = ScoreRW::readScore(PLAYBACK_EVENTS_RENDERING_DIR + "single_note_no_articulations/no_articulations.mscx");
+    ASSERT_TRUE(score);
+
+    Measure* firstMeasure = score->firstMeasure();
+    ASSERT_TRUE(firstMeasure);
+
+    Segment* firstSegment = firstMeasure->segments().firstCRSegment();
+    ASSERT_TRUE(firstSegment);
+
+    Chord* chord = toChord(firstSegment->nextChordRest(0));
+    ASSERT_TRUE(chord);
+
+    Note* note = chord->upNote();
+    ASSERT_TRUE(note);
+
+    Symbol* staccato = new Symbol(note);
+    staccato->setSym(SymId::articStaccatoAbove);
+    note->add(staccato);
+
+    Symbol* accent = new Symbol(note);
+    accent->setSym(SymId::articAccentAbove);
+    note->add(accent);
+
+    // The standard fallback preserves neutral timing for MIDI/SoundFont
+    // profiles, while the retained types enable MuseSampler sample selection.
+    m_defaultProfile->setPattern(ArticulationType::Standard, m_dummyPattern);
+
+    PlaybackContextPtr ctx = std::make_shared<PlaybackContext>(score);
+    PlaybackEventsMap result;
+    m_renderer.render(chord, 0, m_defaultProfile, ctx, result);
+
+    ASSERT_EQ(result.size(), 1);
+
+    const mpe::NoteEvent& event = std::get<mpe::NoteEvent>(result.begin()->second.front());
+    EXPECT_EQ(event.expressionCtx().articulations.size(), 2);
+    EXPECT_TRUE(event.expressionCtx().articulations.contains(ArticulationType::Staccato));
+    EXPECT_TRUE(event.expressionCtx().articulations.contains(ArticulationType::Accent));
 }
 
 /**
