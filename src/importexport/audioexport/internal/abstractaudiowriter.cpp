@@ -28,8 +28,11 @@
 #include <QThread>
 
 #include "global/containers.h"
+#include "io/buffer.h"
 #include "log.h"
 
+#include "audioexportmetadata.h"
+#include "notation/imasternotation.h"
 #include "notation/inotation.h"
 
 using namespace muse;
@@ -131,7 +134,7 @@ Ret AbstractAudioWriter::doWriteAndWait(INotationPtr notation,
     actualFormat.trailingSilenceDuration = std::isfinite(trailingSilenceSec)
                                            ? static_cast<msecs_t>(trailingSilenceSec) : msecs_t(0);
 
-    doWrite(dstDevice, actualFormat);
+    doWrite(notation, dstDevice, actualFormat);
 
     const bool waitForCompletion = muse::value(options, OptionKey::WAIT_FOR_COMPLETION, Val(true)).toBool();
     if (waitForCompletion) {
@@ -144,7 +147,7 @@ Ret AbstractAudioWriter::doWriteAndWait(INotationPtr notation,
     return m_writeRet;
 }
 
-void AbstractAudioWriter::doWrite(io::IODevice& dstDevice, const SoundTrackFormat& format)
+void AbstractAudioWriter::doWrite(notation::INotationPtr notation, io::IODevice& dstDevice, const SoundTrackFormat& format)
 {
     muse::ContextInject<muse::audio::IPlayback> playbackInj = { m_iocContext };
 
@@ -172,6 +175,7 @@ void AbstractAudioWriter::doWrite(io::IODevice& dstDevice, const SoundTrackForma
     };
 
     m_progress.start();
+    m_soundTrackType = format.type;
 
     auto playback = playbackInj();
 
@@ -180,20 +184,33 @@ void AbstractAudioWriter::doWrite(io::IODevice& dstDevice, const SoundTrackForma
         sendProgress(current, total, stage);
     });
 
-    playback->saveSoundTrack(std::move(format), dstDevice)
-    .onResolve(this, [this, playback, restorePlaybackState](const bool /*result*/) {
+    // Encoders write their elementary stream directly to an IODevice.  Buffer it here so
+    // format-specific metadata can be inserted without changing the renderer or encoder.
+    m_encodedAudio = std::make_unique<io::Buffer>(io::Buffer::opened(io::IODevice::WriteOnly));
+
+    playback->saveSoundTrack(std::move(format), *m_encodedAudio)
+    .onResolve(this, [this, notation, &dstDevice, playback, restorePlaybackState](const bool /*result*/) {
         LOGI() << "Successfully saved sound track";
 
         restorePlaybackState();
 
-        m_writeRet = muse::make_ok();
+        const ByteArray encodedAudio = m_encodedAudio->data();
+        const ByteArray audioWithMetadata = addAudioExportMetadata(encodedAudio, notation, m_soundTrackType);
+        if (dstDevice.write(audioWithMetadata.toQByteArrayNoCopy()) != audioWithMetadata.size()) {
+            m_writeRet = make_ret(Ret::Code::UnknownError);
+        } else {
+            m_writeRet = muse::make_ok();
+        }
+        m_encodedAudio.reset();
+
         m_isCompleted = true;
-        m_progress.finish(muse::make_ok());
+        m_progress.finish(m_writeRet);
         playback->saveSoundTrackProgressChanged().disconnect(this);
     })
     .onReject(this, [this, playback, restorePlaybackState](int errorCode, const std::string& msg) {
         restorePlaybackState();
 
+        m_encodedAudio.reset();
         m_writeRet = Ret(errorCode, msg);
         m_isCompleted = true;
         m_progress.finish(make_ret(errorCode, msg));
