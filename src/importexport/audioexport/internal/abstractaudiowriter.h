@@ -33,6 +33,10 @@
 
 #include "project/inotationwriter.h"
 
+namespace muse::io {
+class Buffer;
+}
+
 namespace mu::iex::audioexport {
 class AbstractAudioWriter : public project::INotationWriter, public muse::Contextable, public muse::async::Asyncable
 {
@@ -60,7 +64,7 @@ protected:
                              const Options& options = Options());
 
 private:
-    void doWrite(muse::io::IODevice& dstDevice, const muse::audio::SoundTrackFormat& format);
+    void doWrite(notation::INotationPtr notation, muse::io::IODevice& dstDevice, const muse::audio::SoundTrackFormat& format);
 
     UnitType unitTypeFromOptions(const Options& options) const;
 
@@ -68,8 +72,10 @@ private:
     muse::Progress m_progress;
     bool m_isCompleted = false;
     muse::Ret m_writeRet;
+    muse::audio::SoundTrackType m_soundTrackType = muse::audio::SoundTrackType::WAV;
 
     notation::INotationPtr m_notationForRestore;
+    std::unique_ptr<muse::io::Buffer> m_encodedAudio;
 };
 }
 
